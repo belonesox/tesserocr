@@ -1,3 +1,7 @@
+
+import distutils.debug 
+distutils.debug.DEBUG=True
+
 import codecs
 import errno
 import glob
@@ -166,6 +170,59 @@ def find_library(pattern, path_list, version=''):
     return result
 
 
+
+def get_config_from_conan_libs():
+    from pathlib import Path    
+    
+    libs = {
+        'leptonica': 'df0cc7327471ecf91d33a9dab851dc0501e32794',
+        'dmtesseract': '47bc108bb942d345a05885b1e512e643e5a50cad',
+        'libjpeg': '29d1f4003b3f7143826ef1988625574513d526ce',
+        'giflib': '123c30f30ee9963162cb3e4c71f3f94b3b839b8c',
+        'libpng': '112258686c8293e31a06723b91e779f7b470bc53',
+        'libtiff': '034da9794595dc04f2ec318f65050ca517d4ce23',
+        'libwebp': 'bbd45575c238ef8ca11074c47682732044756e90',
+        'openjpeg': '29d1f4003b3f7143826ef1988625574513d526ce',
+        'zlib': '29d1f4003b3f7143826ef1988625574513d526ce',
+        'jbig': '944d8be4ffb79a3eecd0bb5aea23712122d5cd20',
+        'libdeflate': '29d1f4003b3f7143826ef1988625574513d526ce',
+        'libarchive': 'f7ffa751618424bb026920710a3d49e59a8b88c5',
+        'xz_utils': '29d1f4003b3f7143826ef1988625574513d526ce',
+        'zstd': '29d1f4003b3f7143826ef1988625574513d526ce',
+    }
+
+    conanroot = os.environ.get('CONANROOT')
+    libpaths = []
+    includepaths = []
+    libraries = []
+    dlls = []
+
+    config = {}
+    version = '4.1.1'
+    config['compile_time_env'] = {
+        'TESSERACT_MAJOR_VERSION': major_version(version),
+        'TESSERACT_VERSION': version_to_int(version)
+    }
+
+    for lib_, hash_ in libs.items():
+        # libraries.append(lib_)
+        for packagepath in Path(conanroot).glob(f'{lib_}/*/*/*/package/{hash_}'):
+            includepaths.append(str(packagepath / "include"))
+            for libpath_ in (packagepath / "lib").glob(f'*.lib'):
+                libraries.append(str(libpath_.stem))
+                libpaths.append(str(libpath_.parent))
+            for libpath_ in (packagepath / "bin").glob(f'*.dll'):
+                dlls.append(str(libpath_))
+
+
+    config['libraries'] = libraries
+    config['library_dirs'] = libpaths
+    config['include_dirs'] = includepaths
+    config['dlls'] = dlls
+
+    return config
+
+
 def get_tesseract_version():
     """Try to extract version from tesseract otherwise default min version."""
     config = {'libraries': ['tesseract', 'lept']}
@@ -195,6 +252,11 @@ def get_tesseract_version():
         'TESSERACT_MAJOR_VERSION': major_version(version),
         'TESSERACT_VERSION': version_to_int(version)
     }
+
+
+
+
+
     if sys.platform == 'win32':
         libpaths = os.getenv('LIBPATH', None)
         if libpaths:
@@ -249,16 +311,35 @@ def get_build_args():
             _LOGGER.warning(
                 'pkg-config failed to find tesseract/leptonica libraries: %s', e
             )
-        build_args = get_tesseract_version()
+        # build_args = get_tesseract_version()
+        build_args = get_config_from_conan_libs()
 
+#     build_args["include_dirs"] += [
+#         R"C:\Users\stas\.conan\data\tesseract\4.1.1\_\_\package\041a82c9eae3dadb727a7dd11ed11397044be0e0\include",
+#     ]
+#     build_args["libraries"] += [
+#     #		"leptonica-1.76.0", 
+#         "tesseract41"
+#     ]
+#     build_args["library_dirs"]=[
+#         # tesseract .lib import library
+#         # R"C:/projects/tesserocr-windows-cmake/tesseract/build/Release",
+
+#         # leptonica (and deps) .lib import libraries
+#  #       R"C:/Tools/vcpkg/installed/x64-windows/lib"
+#         R"C:\Users\stas\.conan\data\tesseract\4.1.1\_\_\package\041a82c9eae3dadb727a7dd11ed11397044be0e0\lib"
+#     ]
     _LOGGER.debug('build parameters: %s', build_args)
     return build_args
+
+config = get_build_args()
 
 
 def make_extension():
     global _CYTHON_COMPILE_TIME_ENV
-    build_args = get_build_args()
+    build_args = config
     _CYTHON_COMPILE_TIME_ENV = build_args.pop('compile_time_env')
+    print(build_args)
     return Extension(
         'tesserocr', sources=['tesserocr.pyx'], language='c++', **build_args
     )
@@ -289,6 +370,7 @@ class my_build_ext(build_ext, object):
         )
         super(my_build_ext, self).finalize_options()
 
+distutils.debug.DEBUG=True
 
 setup(
     name='tesserocr',
@@ -327,4 +409,6 @@ setup(
     ext_modules=[make_extension()],
     test_suite='tests',
     setup_requires=['Cython>=0.23'],
+    data_files=config['dlls'],
 )
+
